@@ -8,6 +8,26 @@ public class Shader_Test_Project : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "HeadMountedDisplay" });
-	}
+        PublicDependencyModuleNames.AddRange(
+                new string[]
+                {
+                    "Core",
+                    "CoreUObject",
+                    "Engine",
+                    "InputCore",
+                    "HeadMountedDisplay",
+                    "RHI",
+                    "RenderCore",
+                    "ShaderCore",
+					// ... add other public dependencies that you statically link with here ...
+				}
+                );
+
+        PrivateDependencyModuleNames.AddRange(
+            new string[]
+            {
+                // ... add private dependencies that you statically link with here ...
+            }
+            );
+    }
 }

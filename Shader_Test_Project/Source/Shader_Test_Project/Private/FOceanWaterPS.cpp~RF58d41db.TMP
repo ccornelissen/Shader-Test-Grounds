@@ -1,0 +1,76 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
+#include "Public/GlobalShader.h"
+#include "Public/RHIStaticStates.h"
+#include "Public/ShaderParameterUtils.h"
+
+
+
+class FOceanWaterPS : public FGlobalShader
+{
+public:
+	static bool ShouldCache(EShaderPlatform Platform)
+	{
+		return true;
+	}
+
+	FOceanWaterPS() {}
+
+	FOceanWaterPS(const ShaderMetaType::CompiledShaderInitializerType& Initializer)
+		: FGlobalShader(Initializer)
+	{
+		ScreenParamX.Bind(Initializer.ParameterMap, TEXT("ScreenParamX"));
+		ScreenParamY.Bind(Initializer.ParameterMap, TEXT("ScreenParamY"));
+		MyTime.Bind(Initializer.ParameterMap, TEXT("MyTime"));
+		MouseX.Bind(Initializer.ParameterMap, TEXT("MouseX"));
+	}
+	
+	const FVector2D ViewportSize = FVector2D(GEngine->GameViewport->Viewport->GetSizeXY());
+
+	template<typename TShaderRHIParamRef>
+	void SetParameters()
+	{
+		SetShaderValue(ScreenParamX, ViewportSize.X);
+		SetShaderValue(ScreenParamY, ViewportSize.Y);
+		SetShaderValue(MyTime, World->GetTimeSeconds());
+		SetShaderValue(MouseX, (ViewportSize.X/2));
+	}
+
+	virtual bool Serialize(FArchive& Ar) override
+	{
+		bool bShaderHasOutdatedParameters = FGlobalShader::Serialize(Ar);
+		Ar << ScreenParamX << ScreenParamY << MyTime << MouseX;
+		return bShaderHasOutdatedParameters;
+	}
+	
+
+private:
+	FShaderParameter ScreenParamX;
+	FShaderParameter ScreenParamY;
+	FShaderParameter MyTime;
+	FShaderParameter MouseX;
+
+};
+
+
+class FOceanWaterShaderPS : FOceanWaterPS
+{
+	DECLARE_SHADER_TYPE(FOceanWaterShaderPS, Global);
+
+public:
+
+	// Default constructor. 
+	FOceanWaterShaderPS() {}
+
+	// Initialization constructor.
+	FOceanWaterShaderPS(const ShaderMetaType::CompiledShaderInitializerType& Initializer)
+		: FOceanWaterPS(Initializer)
+	{ }
+};
+
+
+IMPLEMENT_SHADER_TYPE(, FOceanWaterShaderPS, TEXT("/Shader/Private/Test.usf"), TEXT("MainPixelShader"), SF_Pixel);
+

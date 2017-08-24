@@ -1,0 +1,218 @@
+#include "/Engine/Public/Platform.ush"
+
+const uint iSteps = 8;
+const float fPie = 3.1415;
+const float fEpsilon = 0.001;
+
+float ScreenParamX;
+float ScreenParamY;
+float MyTime;
+float MouseX;
+
+const float fEpsNormal = 1.0 / ScreenParamX;
+
+//Sea Ocean Controls
+const uint iGeom = 3;
+const uint iFragment = 5;
+const float fHeight = 0.6;
+const float fChop = 4.0;
+const float fSpeed = 0.8;
+const float fFrequency = 0.16;
+const float3 Base = float3(0.1, 0.19, 0.22);
+const float3 WaterColor = float3(0.8, 0.9, 0.6);
+const float2x2 Octave = float2x2(1.6, 1.2, -1.2, 1.6);
+const float fSeaTime = 1.0 * MyTime * fSpeed;
+
+//Math
+float3x3 Euler(float3 ang)
+{
+	float2 a1 = float2(sin(ang.x), cos(ang.x));
+	float2 a2 = float2(sin(ang.y), cos(ang.y));
+	float2 a3 = float2(sin(ang.z), cos(ang.z));
+
+	float3x3 m;
+	m[0] = float3(a1.y*a3.y + a1.x*a2.x*a3.x, a1.y*a2.x*a3.x + a3.y*a1.x, -a2.y*a3.x);
+	m[1] = float3(-a2.y*a1.x, a1.y*a2.y, a2.x);
+	m[2] = float3(a3.y*a1.x*a2.x + a1.y*a3.x, a1.x*a3.x - a1.y*a3.y*a2.x, a2.y*a3.y);
+	return m;
+}
+
+float Hash(float2 p)
+{
+	float h = dot(p, float2(127.1, 311.7));
+	return frac(sin(h) * 43758.54);
+}
+
+float Noise(in float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float2 u = f*f*(3.0 - 2.0*f);
+	return -1.0 + 2.0 * lerp(lerp(hash(i + float2(0.0, 0.0)), hash(i + float2(1.0, 0.0)), u.x), lerp(hash(i + float2(0.0, 1.0)), hash(i + float2(1.0, 1.0)), u.x), u.y);
+}
+
+float Diffuse(float2 n, float3 l, float p)
+{
+	return pow(dot(n, l) * 0.4 + 0.6, p);
+}
+
+float Specular(float3 n, float3 l, float3 e, float s)
+{
+	float nrm = (s + 0.8) / (fPie * 8.0);
+	return pow(max(dot(reflect(e, n), l), 0.0), s) * nrm;
+}
+
+//Sky
+float3 GetSkyColor(float3 e)
+{
+	e.y = max(e.y, 0.0);
+	return float3(pow(1.0 - e.y, 2.0), 1.0 - e.y, 0.6 + (1.0 - e.y)*0.4);
+}
+
+//Sea
+float SeaOctave(float2 uv, float choppy)
+{
+	uv += Noise(uv);
+	float2 wv = 1.0 - abs(sin(uv));
+	float2 swv = abs(cos(uv));
+	wv = lerp(wv, swv, wv);
+	return pow(1.0 - pow(wv.x * wv.y, 0.65), fChop);
+}
+
+float Map(float3 p)
+{
+	float freq = fFrequency;
+	float amp = fHeight;
+	float chop = fChop;
+	float2 uv = p.xz;
+	uv.x *= 0.75;
+
+	float d = 0.0;
+	float h = 0.0;
+	for (int i = 0; int i < iGeom; i++)
+	{
+		d = SeaOctave((uv + fSeaTime) * freq, chop);
+		d += SeaOctave((uv - fSeaTime) * freq, chop);
+		h += d * amp;
+		uv *= Octave;
+		freq *= 1.9;
+		amp *= 0.22;
+		chop = lerp(chop, 1.0, 0.2);
+	}
+
+	return p.y - h;
+}
+
+float MapDetailed(float3 p)
+{
+	float freq = fFrequency;
+	float amp = fHeight;
+	float chop = fChop;
+	float2 uv = p.xz;
+	uv.x *= 0.75;
+
+	float d = 0.0;
+	float h = 0.0;
+	for (int i = 0; int i < iFragment; i++)
+	{
+		d = SeaOctave((uv + fSeaTime) * freq, chop);
+		d += SeaOctave((uv - fSeaTime) * freq, chop);
+		h += d * amp;
+		uv *= Octave;
+		freq *= 1.9;
+		amp *= 0.22;
+		chop = lerp(chop, 1.0, 0.2);
+	}
+
+	return p.y - h;
+}
+
+float3 GetSeaColor(float3 p, float3 n, float3 l, float3 eye, float3 dist)
+{
+	float fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
+	fresnel = pow(fresnel, 3.0) * 0.65;
+
+	float3 reflected = GetSkyColor(reflect(eye, n));
+	float3 refracted = Base + Diffuse(n, l, 80.0) * WaterColor * 0.12;
+
+	float3 color = lerp(refracted, reflected, fresnel);
+
+	float atten = max(1.0 - dot(dist, dist) * 0.001, 0.0);
+	color += WaterColor * (p.y - fHeight) * 0.8 * atten;
+
+	color += float3(Specular(n, l, eye, 60.0));
+
+	return color;
+}
+
+// tracing
+float3 getNormal(float3 p, float eps) {
+	float3 n;
+	n.y = MapDetailed(p);
+	n.x = MapDetailed(float3(p.x + eps, p.y, p.z)) - n.y;
+	n.z = MapDetailed(float3(p.x, p.y, p.z + eps)) - n.y;
+	n.y = eps;
+	return normalize(n);
+}
+
+float HeightMapTracing(float3 ori, float3 dir, out float3 p)
+{
+	float tm = 0.0;
+	float tx = 1000.0;
+	float hx = Map(ori + dir * tx);
+	if (hx > 0.0)
+	{
+		return tx;
+	}
+		
+	float hm = Map(ori + dir * tm);
+	float tmid = 0.0;
+	for (int i = 0; i < iSteps; i++) 
+	{
+		tmid = lerp(tm, tx, hm / (hm - hx));
+		p = ori + dir * tmid;
+		float hmid = Map(p);
+
+		if (hmid < 0.0) 
+		{
+			tx = tmid;
+			hx = hmid;
+		}
+		else 
+		{
+			tm = tmid;
+			hm = hmid;
+		}
+	}
+	return tmid;
+}
+
+void Main(float2 fragCoord : SV_POSITION, out float4 OutColor : SV_Target)
+{
+	float2 uv = coord.xy / (ScreenParamX + ScreenParamY);
+	uv = uv * 2.0 - 1.0;
+	uv.x = mul(ScreenParamX / ScreenParamY);
+	float time = MyTime * 0.3 + MouseX * 0.01;
+
+	// ray
+	float3 ang = float3(sin(time * 3.0) * 0.1, sin(time) * 0.2 + 0.3, time);
+	float3 ori = float3(0.0, 3.5, time * 5.0);
+	float3 dir = normalize(float3(uv.xy, -2.0)); dir.z += length(uv) * 0.15;
+	dir = normalize(dir) * Euler(ang);
+
+	// tracing
+	float3 p;
+	HeightMapTracing(ori, dir, p);
+	float3 dist = p - ori;
+	float3 n = GetNormal(p, dot(dist, dist) * fEpsNormal);
+	float3 light = normalize(float3(0.0, 1.0, 0.8));
+
+	// color
+	float3 OutColor = mix(
+		GetSkyColor(dir),
+		GetSeaColor(p, n, light, dir, dist),
+		pow(smoothstep(0.0, -0.05, dir.y), 0.3));
+
+	// post
+	OutColor = float4(pow(color, float3(0.75)), 1.0);
+}
